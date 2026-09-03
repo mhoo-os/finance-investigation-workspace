@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Finance Investigation Workspace — synthetic preview</title>
+    <style>body{font:16px/1.5 system-ui,sans-serif;max-width:960px;margin:2rem auto;padding:0 1rem;color:#172033}h1{margin-bottom:0}.note{color:#586174}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:1rem}.card{border:1px solid #d7dce5;border-radius:10px;padding:1rem}code{word-break:break-all}table{border-collapse:collapse;width:100%;margin-top:.5rem}td,th{border-bottom:1px solid #d7dce5;padding:.5rem;text-align:left}.match{border-left:4px solid #198754}.anomaly{border-left:4px solid #c43b2f}</style>
+  </head>
+  <body>
+    <h1>Finance Investigation Workspace</h1>
+    <p class="note">Synthetic-only local preview. No provider connection, credential, OAuth flow, client data, or deployment.</p>
+    <section aria-labelledby="coverage"><h2 id="coverage">Monthly coverage</h2><div class="card"><strong>2026-01 — COMPLETE</strong><br>Bank: 2 normalized rows · Clover: 2 normalized rows</div></section>
+    <section aria-labelledby="findings"><h2 id="findings">Deterministic reconciliation</h2><div class="grid">
+      <article class="card match"><h3>Matched deposit</h3><p>Bank deposit <strong>$100.00</strong> equals Clover settlement <strong>$100.00</strong> on 2026-01-15.</p><p>Trace: <code>bank-january-2026.json#/transactions/0</code> → <code>clover-january-2026.json#/settlements/0</code></p></article>
+      <article class="card anomaly"><h3>Deliberate anomaly</h3><p>Bank deposit <strong>$42.00</strong> differs from Clover settlement <strong>$40.50</strong> by <strong>$1.50</strong>.</p><p>Trace: <code>bank-january-2026.json#/transactions/1</code> → <code>clover-january-2026.json#/settlements/1</code></p></article>
+    </div></section>
+    <section aria-labelledby="evidence"><h2 id="evidence">Preserved evidence receipts</h2><table><thead><tr><th>Object key</th><th>SHA-256 receipt</th><th>Rows</th></tr></thead><tbody><tr><td><code>evidence/synthetic/bank-january-2026.json</code></td><td>Generated from exact preserved bytes at synthetic seed time</td><td>2</td></tr><tr><td><code>evidence/synthetic/clover-january-2026.json</code></td><td>Generated from exact preserved bytes at synthetic seed time</td><td>2</td></tr></tbody></table></section>
+  </body>
+</html>
