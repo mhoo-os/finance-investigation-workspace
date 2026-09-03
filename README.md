@@ -28,3 +28,5 @@ npm start
 ## Evidence custody
 
 Each R2 key includes the artifact's SHA-256. The write uses an R2 create-only condition plus the platform SHA-256 integrity option. A retry verifies any existing object's bytes and preserves the first D1 import receipt rather than overwriting either side of the custody record. The import clock is injectable for deterministic tests and records the real import time in normal use.
+
+The read API independently re-opens every reported R2 object, hashes its exact bytes against the immutable D1 receipt, and dereferences every normalized record's JSON pointer. It returns no investigation data if an object is missing, bytes or receipt metadata differ, or a pointer fails to identify the expected source row.

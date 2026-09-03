@@ -54,6 +54,50 @@ test('Worker returns a generic error for incomplete source traces', async () => 
   });
 });
 
+test('Worker fails closed when referenced R2 evidence was deleted', async () => {
+  const env = await seededEnvironment();
+  const [objectKey] = env.EVIDENCE.objects.keys();
+  env.EVIDENCE.objects.delete(objectKey);
+  await withoutErrorOutput(async () => {
+    const response = await worker.fetch(new Request('https://example.test/api/investigation'), env);
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), { error: 'Investigation data is unavailable.' });
+  });
+});
+
+test('Worker fails closed when referenced R2 evidence bytes were tampered with', async () => {
+  const env = await seededEnvironment();
+  const evidence = env.EVIDENCE.objects.values().next().value;
+  evidence.raw = evidence.raw.replace('10000', '99999');
+  await withoutErrorOutput(async () => {
+    const response = await worker.fetch(new Request('https://example.test/api/investigation'), env);
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), { error: 'Investigation data is unavailable.' });
+  });
+});
+
+test('Worker fails closed when an evidence JSON pointer is invalid', async () => {
+  const env = await seededEnvironment();
+  const record = env.DB.tables.normalizedRecords.values().next().value;
+  record.sourceRow = '/transactions/99';
+  await withoutErrorOutput(async () => {
+    const response = await worker.fetch(new Request('https://example.test/api/investigation'), env);
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), { error: 'Investigation data is unavailable.' });
+  });
+});
+
+test('Worker fails closed when a valid evidence pointer identifies a different record', async () => {
+  const env = await seededEnvironment();
+  const record = env.DB.tables.normalizedRecords.values().next().value;
+  record.sourceRow = '/transactions/1';
+  await withoutErrorOutput(async () => {
+    const response = await worker.fetch(new Request('https://example.test/api/investigation'), env);
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), { error: 'Investigation data is unavailable.' });
+  });
+});
+
 test('Worker rejects artifacts and records outside the synthetic namespace', async () => {
   const artifactEnv = await seededEnvironment();
   const artifact = artifactEnv.DB.tables.evidenceArtifacts.values().next().value;

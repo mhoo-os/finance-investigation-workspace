@@ -1,5 +1,50 @@
+import { dereferenceArtifact, sha256Hex } from './fixture.js';
+
 const json = (value, status = 200) => new Response(JSON.stringify(value, null, 2), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 const SYNTHETIC_ONLY = 'SYNTHETIC_ONLY';
+const SOURCE_CONTRACTS = {
+  BANK: { dateKey: 'postedOn', amountKey: 'amountCents', recordType: 'DEPOSIT' },
+  CLOVER: { dateKey: 'settledOn', amountKey: 'netCents', recordType: 'SETTLEMENT' },
+};
+
+function requireEvidence(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+async function verifyPreservedEvidence(env, artifacts, receipts, records) {
+  requireEvidence(receipts.length === artifacts.length, 'Evidence receipts do not match artifacts');
+  await Promise.all(artifacts.map(async (artifact) => {
+    const artifactReceipts = receipts.filter((receipt) => receipt.objectKey === artifact.objectKey);
+    requireEvidence(artifactReceipts.length === 1, `Artifact receipt is missing or ambiguous: ${artifact.objectKey}`);
+    const [receipt] = artifactReceipts;
+    requireEvidence(receipt.sha256 === artifact.sha256, `Artifact receipt hash does not match: ${artifact.objectKey}`);
+    requireEvidence(artifact.objectKey.includes(`/${artifact.sourceKind.toLowerCase()}/${artifact.sha256}/`), `Artifact key is not content-addressed: ${artifact.objectKey}`);
+
+    const preserved = await env.EVIDENCE.get(artifact.objectKey);
+    requireEvidence(preserved !== null, `Preserved evidence is missing: ${artifact.objectKey}`);
+    requireEvidence(typeof preserved.arrayBuffer === 'function', `Preserved evidence body is unavailable: ${artifact.objectKey}`);
+    const bytes = await preserved.arrayBuffer();
+    requireEvidence(bytes.byteLength === artifact.bytes, `Preserved evidence size does not match: ${artifact.objectKey}`);
+    requireEvidence(await sha256Hex(bytes) === receipt.sha256, `Preserved evidence hash does not match: ${artifact.objectKey}`);
+
+    const raw = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    const artifactRecords = records.filter((record) => record.artifactKey === artifact.objectKey);
+    for (const record of artifactRecords) {
+      const contract = SOURCE_CONTRACTS[record.sourceKind];
+      requireEvidence(contract !== undefined, `Unsupported evidence source: ${record.sourceKind}`);
+      requireEvidence(record.sourceKind === artifact.sourceKind, `Record source does not match its artifact: ${record.id}`);
+      requireEvidence(record.recordType === contract.recordType, `Record type does not match its source: ${record.id}`);
+      const source = dereferenceArtifact(raw, record.sourceRow);
+      requireEvidence(source.id === record.id, `Evidence pointer identifies the wrong record: ${record.id}`);
+      requireEvidence(source[contract.dateKey] === record.postedOn, `Evidence pointer date does not match: ${record.id}`);
+      requireEvidence(source[contract.amountKey] === record.amountCents, `Evidence pointer amount does not match: ${record.id}`);
+    }
+  }));
+
+  for (const record of records) {
+    requireEvidence(artifacts.some((artifact) => artifact.objectKey === record.artifactKey), `Record artifact is missing: ${record.id}`);
+  }
+}
 
 async function listInvestigation(env) {
   const [coverage, findings, records, artifacts, receipts] = await Promise.all([
@@ -19,6 +64,7 @@ async function listInvestigation(env) {
   const syntheticRecords = records.results.every((record) => ['BANK', 'CLOVER'].includes(record.sourceKind)
     && record.artifactKey.startsWith('evidence/synthetic/sha256/'));
   if (!syntheticArtifacts || !syntheticRecords) throw new Error('Synthetic-only data boundary failed');
+  await verifyPreservedEvidence(env, artifacts.results, receipts.results, records.results);
 
   return {
     classification: SYNTHETIC_ONLY,
