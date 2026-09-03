@@ -1,14 +1,20 @@
-import { dereferenceArtifact, sha256Hex } from './fixture.js';
+import { dereferenceArtifact, deriveCoverage, deriveFindings, sha256Hex } from './fixture.js';
 
 const json = (value, status = 200) => new Response(JSON.stringify(value, null, 2), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 const SYNTHETIC_ONLY = 'SYNTHETIC_ONLY';
 const SOURCE_CONTRACTS = {
-  BANK: { dateKey: 'postedOn', amountKey: 'amountCents', recordType: 'DEPOSIT' },
-  CLOVER: { dateKey: 'settledOn', amountKey: 'netCents', recordType: 'SETTLEMENT' },
+  BANK: { source: 'synthetic-bank', rowsKey: 'transactions', dateKey: 'postedOn', amountKey: 'amountCents', recordType: 'DEPOSIT' },
+  CLOVER: { source: 'synthetic-clover', rowsKey: 'settlements', dateKey: 'settledOn', amountKey: 'netCents', recordType: 'SETTLEMENT' },
 };
+const COVERAGE_FIELDS = ['month', 'bankRows', 'cloverRows', 'status'];
+const FINDING_FIELDS = ['id', 'type', 'status', 'expectedCents', 'observedCents', 'bankRecordId', 'cloverRecordId', 'explanation'];
 
 function requireEvidence(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+function canonicalRows(rows, fields) {
+  return rows.map((row) => JSON.stringify(fields.map((field) => row[field]))).sort().join('\n');
 }
 
 async function verifyPreservedEvidence(env, artifacts, receipts, records) {
@@ -28,10 +34,15 @@ async function verifyPreservedEvidence(env, artifacts, receipts, records) {
     requireEvidence(await sha256Hex(bytes) === receipt.sha256, `Preserved evidence hash does not match: ${artifact.objectKey}`);
 
     const raw = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    const parsed = JSON.parse(raw);
+    const contract = SOURCE_CONTRACTS[artifact.sourceKind];
+    requireEvidence(contract !== undefined, `Unsupported evidence source: ${artifact.sourceKind}`);
+    requireEvidence(parsed.source === contract.source, `Evidence source does not match: ${artifact.objectKey}`);
+    requireEvidence(Array.isArray(parsed[contract.rowsKey]), `Evidence rows are unavailable: ${artifact.objectKey}`);
     const artifactRecords = records.filter((record) => record.artifactKey === artifact.objectKey);
+    requireEvidence(parsed[contract.rowsKey].length === artifact.rowCount, `Artifact row count does not match its source: ${artifact.objectKey}`);
+    requireEvidence(artifactRecords.length === artifact.rowCount, `Normalized records do not cover their artifact: ${artifact.objectKey}`);
     for (const record of artifactRecords) {
-      const contract = SOURCE_CONTRACTS[record.sourceKind];
-      requireEvidence(contract !== undefined, `Unsupported evidence source: ${record.sourceKind}`);
       requireEvidence(record.sourceKind === artifact.sourceKind, `Record source does not match its artifact: ${record.id}`);
       requireEvidence(record.recordType === contract.recordType, `Record type does not match its source: ${record.id}`);
       const source = dereferenceArtifact(raw, record.sourceRow);
@@ -46,6 +57,13 @@ async function verifyPreservedEvidence(env, artifacts, receipts, records) {
   }
 }
 
+function verifyDerivedViews(coverage, findings, records) {
+  const expectedCoverage = deriveCoverage(records);
+  const expectedFindings = deriveFindings(records);
+  requireEvidence(canonicalRows(coverage, COVERAGE_FIELDS) === canonicalRows(expectedCoverage, COVERAGE_FIELDS), 'Coverage does not match verified source records');
+  requireEvidence(canonicalRows(findings, FINDING_FIELDS) === canonicalRows(expectedFindings, FINDING_FIELDS), 'Findings do not match verified source records');
+}
+
 async function listInvestigation(env) {
   const [coverage, findings, records, artifacts, receipts] = await Promise.all([
     env.DB.prepare('SELECT month, bank_rows AS bankRows, clover_rows AS cloverRows, status FROM monthly_coverage ORDER BY month').all(),
@@ -54,17 +72,17 @@ async function listInvestigation(env) {
     env.DB.prepare('SELECT object_key AS objectKey, source_kind AS sourceKind, sha256, bytes, row_count AS rowCount FROM evidence_artifacts ORDER BY object_key').all(),
     env.DB.prepare('SELECT receipt_id AS receiptId, object_key AS objectKey, sha256, imported_at AS importedAt FROM import_receipts ORDER BY object_key').all(),
   ]);
-  const byId = new Map(records.results.map((record) => [record.id, record]));
-  const traceableFindings = findings.results.map((finding) => {
-    const trace = [byId.get(finding.bankRecordId), byId.get(finding.cloverRecordId)].filter(Boolean);
-    if (trace.length !== 2) throw new Error(`Finding is missing a source trace: ${finding.id}`);
-    return { ...finding, trace };
-  });
   const syntheticArtifacts = artifacts.results.every((artifact) => artifact.objectKey.startsWith('evidence/synthetic/sha256/'));
   const syntheticRecords = records.results.every((record) => ['BANK', 'CLOVER'].includes(record.sourceKind)
     && record.artifactKey.startsWith('evidence/synthetic/sha256/'));
   if (!syntheticArtifacts || !syntheticRecords) throw new Error('Synthetic-only data boundary failed');
   await verifyPreservedEvidence(env, artifacts.results, receipts.results, records.results);
+  verifyDerivedViews(coverage.results, findings.results, records.results);
+  const byId = new Map(records.results.map((record) => [record.id, record]));
+  const traceableFindings = findings.results.map((finding) => ({
+    ...finding,
+    trace: [byId.get(finding.bankRecordId), byId.get(finding.cloverRecordId)],
+  }));
 
   return {
     classification: SYNTHETIC_ONLY,

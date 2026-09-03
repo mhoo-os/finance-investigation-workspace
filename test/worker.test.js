@@ -98,6 +98,42 @@ test('Worker fails closed when a valid evidence pointer identifies a different r
   });
 });
 
+test('Worker rejects a forged MATCHED link whose IDs, dates, and amounts disagree', async () => {
+  const env = await seededEnvironment();
+  const finding = env.DB.tables.reconciliationFindings.get('matched-deposit-1');
+  finding.cloverRecordId = 'clover-settlement-anomaly-002';
+  await withoutErrorOutput(async () => {
+    const response = await worker.fetch(new Request('https://example.test/api/investigation'), env);
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), { error: 'Investigation data is unavailable.' });
+  });
+});
+
+test('Worker rejects forged finding amounts or status', async () => {
+  for (const mutate of [
+    (finding) => { finding.expectedCents += 1; },
+    (finding) => { finding.status = 'OPEN'; },
+  ]) {
+    const env = await seededEnvironment();
+    mutate(env.DB.tables.reconciliationFindings.get('matched-deposit-1'));
+    await withoutErrorOutput(async () => {
+      const response = await worker.fetch(new Request('https://example.test/api/investigation'), env);
+      assert.equal(response.status, 500);
+      assert.deepEqual(await response.json(), { error: 'Investigation data is unavailable.' });
+    });
+  }
+});
+
+test('Worker rejects forged coverage counts', async () => {
+  const env = await seededEnvironment();
+  env.DB.tables.monthlyCoverage.get('2026-01').bankRows += 1;
+  await withoutErrorOutput(async () => {
+    const response = await worker.fetch(new Request('https://example.test/api/investigation'), env);
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), { error: 'Investigation data is unavailable.' });
+  });
+});
+
 test('Worker rejects artifacts and records outside the synthetic namespace', async () => {
   const artifactEnv = await seededEnvironment();
   const artifact = artifactEnv.DB.tables.evidenceArtifacts.values().next().value;

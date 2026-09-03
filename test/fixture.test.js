@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { BANK_ARTIFACT, CLOVER_ARTIFACT, dereferenceArtifact, EVIDENCE_PREFIX, sha256Hex, syntheticDataset } from '../src/fixture.js';
+import { BANK_ARTIFACT, CLOVER_ARTIFACT, dereferenceArtifact, deriveCoverage, EVIDENCE_PREFIX, sha256Hex, syntheticDataset } from '../src/fixture.js';
 
 test('preserves two unchanged synthetic artifacts with SHA-256 receipts', async () => {
   const dataset = await syntheticDataset();
@@ -21,6 +21,23 @@ test('normalizes linked records and exposes one match and one deliberate anomaly
   assert.deepEqual(dataset.findings.map((finding) => finding.status), ['MATCHED', 'OPEN']);
   assert.equal(dataset.findings[0].expectedCents, dataset.findings[0].observedCents);
   assert.equal(dataset.findings[1].expectedCents - dataset.findings[1].observedCents, 150);
+});
+
+test('derives ordered monthly coverage from normalized records', () => {
+  const records = [
+    { sourceKind: 'BANK', postedOn: '2026-02-01' },
+    { sourceKind: 'BANK', postedOn: '2026-01-30' },
+    { sourceKind: 'CLOVER', postedOn: '2026-01-31' },
+    { sourceKind: 'CLOVER', postedOn: '2026-02-02' },
+  ];
+  assert.deepEqual(deriveCoverage(records), [
+    { month: '2026-01', bankRows: 1, cloverRows: 1, status: 'COMPLETE' },
+    { month: '2026-02', bankRows: 1, cloverRows: 1, status: 'COMPLETE' },
+  ]);
+  assert.throws(
+    () => deriveCoverage([{ sourceKind: 'CLOVER', postedOn: '2026-03-01' }]),
+    /without both sources/,
+  );
 });
 
 test('each finding traces to exact source artifact rows', async () => {

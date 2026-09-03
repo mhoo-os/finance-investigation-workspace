@@ -66,25 +66,26 @@ async function buildArtifact({ filename, sourceKind, raw, rowsKey, source, month
   };
 }
 
-export async function syntheticDataset({ bankRaw = BANK_ARTIFACT, cloverRaw = CLOVER_ARTIFACT } = {}) {
-  const [bank, clover] = await Promise.all([
-    buildArtifact({ filename: 'bank-january-2026.json', sourceKind: 'BANK', raw: bankRaw, rowsKey: 'transactions', source: 'synthetic-bank', month: '2026-01', amountKey: 'amountCents', dateKey: 'postedOn' }),
-    buildArtifact({ filename: 'clover-january-2026.json', sourceKind: 'CLOVER', raw: cloverRaw, rowsKey: 'settlements', source: 'synthetic-clover', month: '2026-01', amountKey: 'netCents', dateKey: 'settledOn' }),
-  ]);
+export function deriveCoverage(records) {
+  const byMonth = new Map();
+  for (const record of records) {
+    const month = record.postedOn.slice(0, 7);
+    const coverage = byMonth.get(month) ?? { month, bankRows: 0, cloverRows: 0, status: 'COMPLETE' };
+    coverage[record.sourceKind === 'BANK' ? 'bankRows' : 'cloverRows'] += 1;
+    byMonth.set(month, coverage);
+  }
+  const coverage = [...byMonth.values()];
+  if (coverage.some((month) => Math.min(month.bankRows, month.cloverRows) === 0)) {
+    throw new Error('Cannot mark monthly coverage complete without both sources');
+  }
+  return coverage.sort((left, right) => left.month.localeCompare(right.month));
+}
 
-  const records = [bank, clover].flatMap((artifact) => artifact.rows.map((row, index) => ({
-    id: row.id,
-    sourceKind: artifact.sourceKind,
-    postedOn: row[artifact.dateKey],
-    amountCents: row[artifact.amountKey],
-    recordType: artifact.sourceKind === 'BANK' ? 'DEPOSIT' : 'SETTLEMENT',
-    artifactKey: artifact.objectKey,
-    sourceRow: `/${artifact.rowsKey}/${index}`,
-  })));
-
-  const bankRecords = records.filter((record) => record.sourceKind === 'BANK');
+export function deriveFindings(records) {
+  const byDateThenId = (left, right) => `${left.postedOn}:${left.id}`.localeCompare(`${right.postedOn}:${right.id}`);
+  const bankRecords = records.filter((record) => record.sourceKind === 'BANK').sort(byDateThenId);
   const cloverRecords = records.filter((record) => record.sourceKind === 'CLOVER');
-  const findings = bankRecords.map((bankRecord, index) => {
+  return bankRecords.map((bankRecord, index) => {
     const candidates = cloverRecords.filter((record) => record.postedOn === bankRecord.postedOn);
     if (candidates.length !== 1) throw new Error(`Expected one Clover settlement for ${bankRecord.postedOn}`);
     const cloverRecord = candidates[0];
@@ -102,11 +103,31 @@ export async function syntheticDataset({ bankRaw = BANK_ARTIFACT, cloverRaw = CL
         : `Deliberate synthetic $${((bankRecord.amountCents - cloverRecord.amountCents) / 100).toFixed(2)} difference; review source rows before drawing a conclusion.`,
     };
   });
+}
+
+export async function syntheticDataset({ bankRaw = BANK_ARTIFACT, cloverRaw = CLOVER_ARTIFACT } = {}) {
+  const [bank, clover] = await Promise.all([
+    buildArtifact({ filename: 'bank-january-2026.json', sourceKind: 'BANK', raw: bankRaw, rowsKey: 'transactions', source: 'synthetic-bank', month: '2026-01', amountKey: 'amountCents', dateKey: 'postedOn' }),
+    buildArtifact({ filename: 'clover-january-2026.json', sourceKind: 'CLOVER', raw: cloverRaw, rowsKey: 'settlements', source: 'synthetic-clover', month: '2026-01', amountKey: 'netCents', dateKey: 'settledOn' }),
+  ]);
+
+  const records = [bank, clover].flatMap((artifact) => artifact.rows.map((row, index) => ({
+    id: row.id,
+    sourceKind: artifact.sourceKind,
+    postedOn: row[artifact.dateKey],
+    amountCents: row[artifact.amountKey],
+    recordType: artifact.sourceKind === 'BANK' ? 'DEPOSIT' : 'SETTLEMENT',
+    artifactKey: artifact.objectKey,
+    sourceRow: `/${artifact.rowsKey}/${index}`,
+  })));
+
+  const findings = deriveFindings(records);
+  const [coverage] = deriveCoverage(records);
 
   return {
     artifacts: [bank, clover],
     records,
-    coverage: { month: bank.month, bankRows: bank.rows.length, cloverRows: clover.rows.length, status: 'COMPLETE' },
+    coverage,
     findings,
   };
 }
