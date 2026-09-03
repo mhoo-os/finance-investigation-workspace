@@ -1,0 +1,10 @@
+{
+  "tracker": { "type": "linear", "teamKey": "MHO", "reviewState": "In Review" },
+  "stacks": ["node"],
+  "prHost": "github",
+  "gates": {
+    "coverage": { "mode": "auto", "min": 95 },
+    "e2e": { "mode": "auto" }
+  },
+  "test": { "coverageCommands": ["npm run coverage"] }
+}
