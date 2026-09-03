@@ -1,4 +1,5 @@
 const json = (value, status = 200) => new Response(JSON.stringify(value, null, 2), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
+const SYNTHETIC_ONLY = 'SYNTHETIC_ONLY';
 
 async function listInvestigation(env) {
   const [coverage, findings, records, artifacts, receipts] = await Promise.all([
@@ -9,18 +10,39 @@ async function listInvestigation(env) {
     env.DB.prepare('SELECT receipt_id AS receiptId, object_key AS objectKey, sha256, imported_at AS importedAt FROM import_receipts ORDER BY object_key').all(),
   ]);
   const byId = new Map(records.results.map((record) => [record.id, record]));
+  const traceableFindings = findings.results.map((finding) => {
+    const trace = [byId.get(finding.bankRecordId), byId.get(finding.cloverRecordId)].filter(Boolean);
+    if (trace.length !== 2) throw new Error(`Finding is missing a source trace: ${finding.id}`);
+    return { ...finding, trace };
+  });
+  const syntheticArtifacts = artifacts.results.every((artifact) => artifact.objectKey.startsWith('evidence/synthetic/sha256/'));
+  const syntheticRecords = records.results.every((record) => ['BANK', 'CLOVER'].includes(record.sourceKind)
+    && record.artifactKey.startsWith('evidence/synthetic/sha256/'));
+  if (!syntheticArtifacts || !syntheticRecords) throw new Error('Synthetic-only data boundary failed');
+
   return {
+    classification: SYNTHETIC_ONLY,
+    access: 'PUBLIC_SYNTHETIC_READ_ONLY',
     coverage: coverage.results,
     artifacts: artifacts.results,
     receipts: receipts.results,
-    findings: findings.results.map((finding) => ({ ...finding, trace: [byId.get(finding.bankRecordId), byId.get(finding.cloverRecordId)].filter(Boolean) })),
+    findings: traceableFindings,
   };
 }
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname === '/api/investigation' && request.method === 'GET') return json(await listInvestigation(env));
+    if (url.pathname === '/api/investigation') {
+      if (request.method !== 'GET') return new Response(null, { status: 405, headers: { allow: 'GET' } });
+      if (env.DATA_CLASSIFICATION !== SYNTHETIC_ONLY) return json({ error: 'Synthetic-only data boundary is unavailable.' }, 503);
+      try {
+        return json(await listInvestigation(env));
+      } catch (error) {
+        console.error(JSON.stringify({ message: 'investigation query failed', errorType: error instanceof Error ? error.name : 'UnknownFailure' }));
+        return json({ error: 'Investigation data is unavailable.' }, 500);
+      }
+    }
     return env.ASSETS.fetch(request);
   },
 };

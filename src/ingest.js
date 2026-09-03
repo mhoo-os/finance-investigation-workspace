@@ -1,18 +1,35 @@
-import { syntheticDataset } from './fixture.js';
+import { sha256Hex, syntheticDataset } from './fixture.js';
 
 const byteLength = (value) => new TextEncoder().encode(value).byteLength;
 
-export async function ingestSyntheticEvidence(env) {
+async function preserveArtifact(bucket, artifact) {
+  const stored = await bucket.put(artifact.objectKey, artifact.raw, {
+    onlyIf: { etagDoesNotMatch: '*' },
+    sha256: artifact.sha256,
+    httpMetadata: { contentType: 'application/json' },
+    customMetadata: { classification: 'SYNTHETIC_ONLY', sha256: artifact.sha256 },
+  });
+  if (stored !== null) return;
+
+  const existing = await bucket.get(artifact.objectKey);
+  if (existing === null) throw new Error(`Evidence object disappeared: ${artifact.objectKey}`);
+  const existingHash = await sha256Hex(new TextDecoder().decode(await existing.arrayBuffer()));
+  if (existingHash !== artifact.sha256) throw new Error(`Immutable evidence hash mismatch: ${artifact.objectKey}`);
+}
+
+export async function ingestSyntheticEvidence(env, { now = () => new Date() } = {}) {
   const dataset = await syntheticDataset();
   const statements = [];
+  const importedAt = now();
+  if (!(importedAt instanceof Date) || Number.isNaN(importedAt.valueOf())) throw new Error('Import clock returned an invalid date');
 
   for (const artifact of dataset.artifacts) {
-    await env.EVIDENCE.put(artifact.objectKey, artifact.raw, { httpMetadata: { contentType: 'application/json' } });
+    await preserveArtifact(env.EVIDENCE, artifact);
     statements.push(
-      env.DB.prepare('INSERT OR REPLACE INTO evidence_artifacts (object_key, source_kind, sha256, bytes, row_count) VALUES (?, ?, ?, ?, ?)')
+      env.DB.prepare('INSERT OR IGNORE INTO evidence_artifacts (object_key, source_kind, sha256, bytes, row_count) VALUES (?, ?, ?, ?, ?)')
         .bind(artifact.objectKey, artifact.sourceKind, artifact.sha256, byteLength(artifact.raw), artifact.rows.length),
-      env.DB.prepare('INSERT OR REPLACE INTO import_receipts (receipt_id, object_key, sha256, imported_at) VALUES (?, ?, ?, ?)')
-        .bind(`sha256:${artifact.sha256}`, artifact.objectKey, artifact.sha256, '2026-01-31T00:00:00.000Z'),
+      env.DB.prepare('INSERT OR IGNORE INTO import_receipts (receipt_id, object_key, sha256, imported_at) VALUES (?, ?, ?, ?)')
+        .bind(`sha256:${artifact.sourceKind.toLowerCase()}:${artifact.sha256}`, artifact.objectKey, artifact.sha256, importedAt.toISOString()),
     );
   }
   for (const record of dataset.records) {

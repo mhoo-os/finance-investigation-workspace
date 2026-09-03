@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/fixture.js && node --check src/ingest.js && node --check src/worker.js",
-    "preview": "node src/preview.js"
+    "coverage": "node --experimental-test-coverage --test --test-coverage-include='src/**/*.js' --test-coverage-include='public/**/*.js' --test-coverage-lines=95 --test-coverage-branches=95 --test-coverage-functions=95",
+    "check": "node --check src/fixture.js && node --check src/ingest.js && node --check src/local-bindings.js && node --check src/local.js && node --check src/worker.js && node --check public/app.js",
+    "start": "node --input-type=module --eval \"import('./src/local.js').then(async ({ startLocalWorkspace }) => { const { url } = await startLocalWorkspace(); console.log('Synthetic Finance Investigation Workspace: ' + url); })\"",
+    "preview": "npm start"
   }
 }

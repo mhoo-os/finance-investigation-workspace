@@ -6,5 +6,5 @@
     "coverage": { "mode": "auto", "min": 95 },
     "e2e": { "mode": "auto" }
   },
-  "test": { "coverageCommands": [] }
+  "test": { "coverageCommands": ["npm run coverage"] }
 }
