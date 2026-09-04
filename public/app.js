@@ -12,7 +12,7 @@ export async function loadInvestigation(fetcher) {
     const response = await fetcher('/api/investigation', { headers: { accept: 'application/json' } });
     if (!response.ok) throw new Error('Request failed');
     const data = await response.json();
-    if (data.classification !== 'SYNTHETIC_ONLY' || data.access !== 'PUBLIC_SYNTHETIC_READ_ONLY') throw new Error('Unsafe data boundary');
+    if (data.classification !== 'SYNTHETIC_ONLY' || !['PUBLIC_SYNTHETIC_READ_ONLY', 'CLOUDFLARE_ACCESS_PROTECTED'].includes(data.access)) throw new Error('Unsafe data boundary');
     if (!Array.isArray(data.coverage) || !Array.isArray(data.findings) || data.coverage.length === 0 || data.findings.length === 0) {
       return { status: 'empty' };
     }
@@ -45,7 +45,8 @@ export function renderView(state) {
     return `<tr><td><code>${escapeHtml(artifact.objectKey)}</code></td><td><code>${escapeHtml(receipt?.sha256 ?? 'missing')}</code></td><td>${escapeHtml(artifact.rowCount)}</td><td>${escapeHtml(receipt?.importedAt ?? 'missing')}</td></tr>`;
   }).join('');
 
-  return `<p class="note" role="status">Loaded synthetic-only, public read-only investigation data.</p>
+  const accessLabel = state.data.access === 'CLOUDFLARE_ACCESS_PROTECTED' ? 'Cloudflare Access-protected staging' : 'local public read-only preview';
+  return `<p class="note" role="status">Loaded synthetic-only investigation data from ${accessLabel}.</p>
     <section aria-labelledby="coverage"><h2 id="coverage">Monthly coverage</h2><div class="grid">${coverageMarkup}</div></section>
     <section aria-labelledby="findings"><h2 id="findings">Deterministic reconciliation</h2><div class="grid">${findingMarkup}</div></section>
     <section aria-labelledby="evidence"><h2 id="evidence">Preserved evidence receipts</h2><div class="table-scroll"><table><thead><tr><th>Object key</th><th>SHA-256 receipt</th><th>Rows</th><th>Imported</th></tr></thead><tbody>${receiptMarkup}</tbody></table></div></section>`;

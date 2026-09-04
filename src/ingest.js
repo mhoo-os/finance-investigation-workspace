@@ -33,14 +33,14 @@ export async function ingestSyntheticEvidence(env, { now = () => new Date() } = 
     );
   }
   for (const record of dataset.records) {
-    statements.push(env.DB.prepare('INSERT OR REPLACE INTO normalized_records (record_id, source_kind, posted_on, amount_cents, record_type, artifact_key, source_row) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    statements.push(env.DB.prepare('INSERT OR IGNORE INTO normalized_records (record_id, source_kind, posted_on, amount_cents, record_type, artifact_key, source_row) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .bind(record.id, record.sourceKind, record.postedOn, record.amountCents, record.recordType, record.artifactKey, record.sourceRow));
   }
   const coverage = dataset.coverage;
-  statements.push(env.DB.prepare('INSERT OR REPLACE INTO monthly_coverage (month, bank_rows, clover_rows, status) VALUES (?, ?, ?, ?)')
+  statements.push(env.DB.prepare('INSERT OR IGNORE INTO monthly_coverage (month, bank_rows, clover_rows, status) VALUES (?, ?, ?, ?)')
     .bind(coverage.month, coverage.bankRows, coverage.cloverRows, coverage.status));
   for (const finding of dataset.findings) {
-    statements.push(env.DB.prepare('INSERT OR REPLACE INTO reconciliation_findings (finding_id, finding_type, status, expected_cents, observed_cents, bank_record_id, clover_record_id, explanation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    statements.push(env.DB.prepare('INSERT OR IGNORE INTO reconciliation_findings (finding_id, finding_type, status, expected_cents, observed_cents, bank_record_id, clover_record_id, explanation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
       .bind(finding.id, finding.type, finding.status, finding.expectedCents, finding.observedCents, finding.bankRecordId, finding.cloverRecordId, finding.explanation));
   }
   await env.DB.batch(statements);
