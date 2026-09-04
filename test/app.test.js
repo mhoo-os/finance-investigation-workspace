@@ -6,7 +6,7 @@ const response = (data, status = 200) => new Response(JSON.stringify(data), { st
 const safePayload = {
   classification: 'SYNTHETIC_ONLY',
   access: 'PUBLIC_SYNTHETIC_READ_ONLY',
-  coverage: [{ month: '2026-01', status: 'COMPLETE', bankRows: 2, cloverRows: 2 }],
+  coverage: [{ month: '2026-01', status: 'COMPLETE', bankRows: 2, cloverRows: 2, trace: [{ artifactKey: 'evidence/synthetic/sha256/bank/hash/file.json', sourceRow: '/transactions/1', sha256: 'abc123' }] }],
   artifacts: [{ objectKey: 'evidence/synthetic/sha256/bank/hash/file.json', rowCount: 2 }],
   receipts: [{ objectKey: 'evidence/synthetic/sha256/bank/hash/file.json', sha256: 'abc123', importedAt: '2026-09-03T12:00:00.000Z' }],
   findings: [{ status: 'OPEN', expectedCents: 4200, observedCents: 4050, explanation: '<review>', trace: [{ artifactKey: 'evidence/synthetic/sha256/bank/hash/file.json', sourceRow: '/transactions/1' }] }],
@@ -31,6 +31,7 @@ test('client renders loading, empty, error, and escaped ready states', () => {
   assert.match(ready, /\$42\.00/);
   assert.match(ready, /\$1\.50/);
   assert.match(ready, /abc123/);
+  assert.match(ready, /transactions\/1/);
   assert.match(ready, /&lt;review&gt;/);
   assert.doesNotMatch(ready, /<review>/);
 

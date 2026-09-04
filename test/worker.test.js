@@ -3,6 +3,7 @@ import test from 'node:test';
 import { ingestSyntheticEvidence } from '../src/ingest.js';
 import { createMemoryEnvironment } from '../src/local-bindings.js';
 import worker from '../src/worker.js';
+import { accessRequest, accessVerificationEnvironment, withAccessCertificates } from '../support/access-fixture.js';
 
 const seededEnvironment = async () => {
   const env = createMemoryEnvironment({ assets: { fetch: async () => new Response('asset') } });
@@ -27,8 +28,11 @@ test('Worker returns source-traceable synthetic investigation data', async () =>
   assert.equal(payload.classification, 'SYNTHETIC_ONLY');
   assert.equal(payload.access, 'PUBLIC_SYNTHETIC_READ_ONLY');
   assert.equal(payload.coverage[0].status, 'COMPLETE');
+  assert.equal(payload.coverage[0].trace.length, 4);
+  assert.ok(payload.coverage[0].trace.every((record) => /^[a-f0-9]{64}$/.test(record.sha256)));
   assert.deepEqual(payload.findings.map((finding) => finding.status), ['MATCHED', 'OPEN']);
   assert.ok(payload.findings.every((finding) => finding.trace.length === 2));
+  assert.ok(payload.findings.flatMap((finding) => finding.trace).every((record) => /^[a-f0-9]{64}$/.test(record.sha256)));
   assert.ok(payload.receipts.every((receipt) => /^[a-f0-9]{64}$/.test(receipt.sha256)));
 });
 
@@ -162,4 +166,67 @@ test('Worker does not leak non-Error database failures', async () => {
 test('Worker delegates non-API requests to static assets', async () => {
   const response = await worker.fetch(new Request('https://example.test/'), { ASSETS: { fetch: async () => new Response('preview') } });
   assert.equal(await response.text(), 'preview');
+});
+
+test('staging fails closed before Access configuration is complete', async () => {
+  const env = { ...await seededEnvironment(), DEPLOYMENT_ENV: 'staging' };
+  const response = await worker.fetch(new Request('https://example.test/'), env);
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: 'Staging access protection is unavailable.' });
+});
+
+test('staging rejects requests without a valid Access assertion', async () => {
+  const env = { ...await seededEnvironment(), ...accessVerificationEnvironment() };
+  const response = await worker.fetch(new Request('https://example.test/api/investigation'), env);
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { error: 'Cloudflare Access authentication is required.' });
+});
+
+test('staging serves binding-backed data and assets only after Access verification', async () => {
+  const env = { ...await seededEnvironment(), ...accessVerificationEnvironment() };
+  await withAccessCertificates(async () => {
+    const api = await worker.fetch(await accessRequest('https://example.test/api/investigation'), env);
+    assert.equal(api.status, 200);
+    assert.equal((await api.json()).access, 'CLOUDFLARE_ACCESS_PROTECTED');
+    const asset = await worker.fetch(await accessRequest('https://example.test/'), env);
+    assert.equal(asset.status, 200);
+    assert.equal(await asset.text(), 'asset');
+  });
+});
+
+test('staging seed route is Access-protected, synthetic-only, and idempotent', async () => {
+  const env = { ...createMemoryEnvironment({ assets: { fetch: async () => new Response('asset') } }), ...accessVerificationEnvironment() };
+  await withAccessCertificates(async () => {
+    const method = await worker.fetch(await accessRequest('https://example.test/ops/seed-synthetic'), env);
+    assert.equal(method.status, 405);
+    assert.equal(method.headers.get('allow'), 'POST');
+
+    const seeded = await worker.fetch(await accessRequest('https://example.test/ops/seed-synthetic', { method: 'POST' }), env);
+    assert.equal(seeded.status, 201);
+    const receipt = await seeded.json();
+    assert.equal(receipt.seeded, true);
+    assert.equal(receipt.artifacts.length, 2);
+
+    const repeated = await worker.fetch(await accessRequest('https://example.test/ops/seed-synthetic', { method: 'POST' }), env);
+    assert.equal(repeated.status, 201);
+    assert.equal(env.EVIDENCE.objects.size, 2);
+  });
+});
+
+test('staging seed route fails closed on classification and storage errors', async () => {
+  const wrongClassification = { ...createMemoryEnvironment(), ...accessVerificationEnvironment(), DATA_CLASSIFICATION: 'CLIENT_DATA' };
+  const failedStorage = { ...createMemoryEnvironment(), ...accessVerificationEnvironment(), EVIDENCE: { put: async () => { throw new Error('private storage detail'); } } };
+  await withAccessCertificates(async () => {
+    assert.equal((await worker.fetch(await accessRequest('https://example.test/ops/seed-synthetic', { method: 'POST' }), wrongClassification)).status, 503);
+    await withoutErrorOutput(async () => {
+      const response = await worker.fetch(await accessRequest('https://example.test/ops/seed-synthetic', { method: 'POST' }), failedStorage);
+      assert.equal(response.status, 500);
+      assert.deepEqual(await response.json(), { error: 'Synthetic staging seed failed.' });
+    });
+  });
+});
+
+test('seed route is absent outside staging', async () => {
+  const response = await worker.fetch(new Request('https://example.test/ops/seed-synthetic', { method: 'POST' }), await seededEnvironment());
+  assert.equal(response.status, 404);
 });

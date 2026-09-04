@@ -29,7 +29,11 @@ export function renderView(state) {
 
   const { artifacts, coverage, findings, receipts } = state.data;
   const receiptsByKey = new Map(receipts.map((receipt) => [receipt.objectKey, receipt]));
-  const coverageMarkup = coverage.map((month) => `<article class="card"><strong>${escapeHtml(month.month)} — ${escapeHtml(month.status)}</strong><br>Bank: ${escapeHtml(month.bankRows)} normalized rows · Clover: ${escapeHtml(month.cloverRows)} normalized rows</article>`).join('');
+  const traceMarkup = (trace) => trace.map((record) => {
+    const sha256 = record.sha256 ?? receiptsByKey.get(record.artifactKey)?.sha256 ?? 'missing';
+    return `<li><code>${escapeHtml(record.artifactKey)}#${escapeHtml(record.sourceRow)}</code><br>SHA-256 <code>${escapeHtml(sha256)}</code></li>`;
+  }).join('');
+  const coverageMarkup = coverage.map((month) => `<article class="card"><strong>${escapeHtml(month.month)} — ${escapeHtml(month.status)}</strong><br>Bank: ${escapeHtml(month.bankRows)} normalized rows · Clover: ${escapeHtml(month.cloverRows)} normalized rows<h3>Exact evidence trace</h3><ul>${traceMarkup(month.trace ?? [])}</ul></article>`).join('');
   const findingMarkup = findings.map((finding) => {
     const matched = finding.status === 'MATCHED';
     const difference = Math.abs(finding.expectedCents - finding.observedCents);
@@ -37,7 +41,7 @@ export function renderView(state) {
     const summary = matched
       ? `Bank deposit ${money(finding.expectedCents)} equals Clover settlement ${money(finding.observedCents)}.`
       : `Bank deposit ${money(finding.expectedCents)} differs from Clover settlement ${money(finding.observedCents)} by ${money(difference)}.`;
-    const trace = finding.trace.map((record) => `<li><code>${escapeHtml(record.artifactKey)}#${escapeHtml(record.sourceRow)}</code></li>`).join('');
+    const trace = traceMarkup(finding.trace);
     return `<article class="card ${matched ? 'match' : 'anomaly'}"><h3>${title}</h3><p>${escapeHtml(summary)}</p><p>${escapeHtml(finding.explanation)}</p><h4>Exact evidence trace</h4><ul>${trace}</ul></article>`;
   }).join('');
   const receiptMarkup = artifacts.map((artifact) => {

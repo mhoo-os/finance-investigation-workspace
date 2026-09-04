@@ -81,15 +81,26 @@ async function listInvestigation(env, access = 'PUBLIC_SYNTHETIC_READ_ONLY') {
   await verifyPreservedEvidence(env, artifacts.results, receipts.results, records.results);
   verifyDerivedViews(coverage.results, findings.results, records.results);
   const byId = new Map(records.results.map((record) => [record.id, record]));
+  const receiptByObjectKey = new Map(receipts.results.map((receipt) => [receipt.objectKey, receipt]));
+  const traceRecord = (record) => ({
+    ...record,
+    sha256: receiptByObjectKey.get(record.artifactKey)?.sha256,
+  });
+  const traceableCoverage = coverage.results.map((month) => ({
+    ...month,
+    trace: records.results
+      .filter((record) => record.postedOn.startsWith(`${month.month}-`))
+      .map(traceRecord),
+  }));
   const traceableFindings = findings.results.map((finding) => ({
     ...finding,
-    trace: [byId.get(finding.bankRecordId), byId.get(finding.cloverRecordId)],
+    trace: [byId.get(finding.bankRecordId), byId.get(finding.cloverRecordId)].map(traceRecord),
   }));
 
   return {
     classification: SYNTHETIC_ONLY,
     access,
-    coverage: coverage.results,
+    coverage: traceableCoverage,
     artifacts: artifacts.results,
     receipts: receipts.results,
     findings: traceableFindings,
