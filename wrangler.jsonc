@@ -1,0 +1,39 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "finance-investigation-workspace",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-09-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/*"]
+  },
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  "env": {
+    "staging": {
+      "name": "mhoo-finance-investigation-staging",
+      "workers_dev": true,
+      "preview_urls": false,
+      "vars": {
+        "DATA_CLASSIFICATION": "SYNTHETIC_ONLY",
+        "DEPLOYMENT_ENV": "staging"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "mhoo-finance-investigation-staging",
+          "database_id": "a76c68a5-8f57-4470-9537-7e2f49f893e0"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "EVIDENCE",
+          "bucket_name": "mhoo-finance-investigation-staging-evidence"
+        }
+      ]
+    }
+  }
+}

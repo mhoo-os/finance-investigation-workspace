@@ -1,7 +1,10 @@
 import { dereferenceArtifact, deriveCoverage, deriveFindings, sha256Hex } from './fixture.js';
+import { accessDenied, accessMisconfigured, verifyAccessAssertion } from './access.js';
+import { ingestSyntheticEvidence } from './ingest.js';
 
 const json = (value, status = 200) => new Response(JSON.stringify(value, null, 2), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 const SYNTHETIC_ONLY = 'SYNTHETIC_ONLY';
+const STAGING = 'staging';
 const SOURCE_CONTRACTS = {
   BANK: { source: 'synthetic-bank', rowsKey: 'transactions', dateKey: 'postedOn', amountKey: 'amountCents', recordType: 'DEPOSIT' },
   CLOVER: { source: 'synthetic-clover', rowsKey: 'settlements', dateKey: 'settledOn', amountKey: 'netCents', recordType: 'SETTLEMENT' },
@@ -64,7 +67,7 @@ function verifyDerivedViews(coverage, findings, records) {
   requireEvidence(canonicalRows(findings, FINDING_FIELDS) === canonicalRows(expectedFindings, FINDING_FIELDS), 'Findings do not match verified source records');
 }
 
-async function listInvestigation(env) {
+async function listInvestigation(env, access = 'PUBLIC_SYNTHETIC_READ_ONLY') {
   const [coverage, findings, records, artifacts, receipts] = await Promise.all([
     env.DB.prepare('SELECT month, bank_rows AS bankRows, clover_rows AS cloverRows, status FROM monthly_coverage ORDER BY month').all(),
     env.DB.prepare('SELECT finding_id AS id, finding_type AS type, status, expected_cents AS expectedCents, observed_cents AS observedCents, bank_record_id AS bankRecordId, clover_record_id AS cloverRecordId, explanation FROM reconciliation_findings ORDER BY finding_id').all(),
@@ -79,34 +82,71 @@ async function listInvestigation(env) {
   await verifyPreservedEvidence(env, artifacts.results, receipts.results, records.results);
   verifyDerivedViews(coverage.results, findings.results, records.results);
   const byId = new Map(records.results.map((record) => [record.id, record]));
+  const receiptByObjectKey = new Map(receipts.results.map((receipt) => [receipt.objectKey, receipt]));
+  const traceRecord = (record) => ({
+    ...record,
+    sha256: receiptByObjectKey.get(record.artifactKey)?.sha256,
+  });
+  const traceableCoverage = coverage.results.map((month) => ({
+    ...month,
+    trace: records.results
+      .filter((record) => record.postedOn.startsWith(`${month.month}-`))
+      .map(traceRecord),
+  }));
   const traceableFindings = findings.results.map((finding) => ({
     ...finding,
-    trace: [byId.get(finding.bankRecordId), byId.get(finding.cloverRecordId)],
+    trace: [byId.get(finding.bankRecordId), byId.get(finding.cloverRecordId)].map(traceRecord),
   }));
 
   return {
     classification: SYNTHETIC_ONLY,
-    access: 'PUBLIC_SYNTHETIC_READ_ONLY',
-    coverage: coverage.results,
+    access,
+    coverage: traceableCoverage,
     artifacts: artifacts.results,
     receipts: receipts.results,
     findings: traceableFindings,
   };
 }
 
+export async function handleWorkspaceRequest(request, env, { access, allowSyntheticSeed }) {
+  const url = new URL(request.url);
+  if (url.pathname === '/ops/seed-synthetic') {
+    if (!allowSyntheticSeed) return new Response(null, { status: 404 });
+    if (request.method !== 'POST') return new Response(null, { status: 405, headers: { allow: 'POST' } });
+    if (env.DATA_CLASSIFICATION !== SYNTHETIC_ONLY) return json({ error: 'Synthetic-only data boundary is unavailable.' }, 503);
+    try {
+      const dataset = await ingestSyntheticEvidence(env);
+      return json({ seeded: true, artifacts: dataset.artifacts.map(({ objectKey, sha256 }) => ({ objectKey, sha256 })) }, 201);
+    } catch (error) {
+      console.error(JSON.stringify({ message: 'synthetic staging seed failed', errorType: error instanceof Error ? error.name : 'UnknownFailure' }));
+      return json({ error: 'Synthetic staging seed failed.' }, 500);
+    }
+  }
+  if (url.pathname === '/api/investigation') {
+    if (request.method !== 'GET') return new Response(null, { status: 405, headers: { allow: 'GET' } });
+    if (env.DATA_CLASSIFICATION !== SYNTHETIC_ONLY) return json({ error: 'Synthetic-only data boundary is unavailable.' }, 503);
+    try {
+      return json(await listInvestigation(env, access));
+    } catch (error) {
+      console.error(JSON.stringify({ message: 'investigation query failed', errorType: error instanceof Error ? error.name : 'UnknownFailure' }));
+      return json({ error: 'Investigation data is unavailable.' }, 500);
+    }
+  }
+  return env.ASSETS.fetch(request);
+}
+
 export default {
   async fetch(request, env) {
-    const url = new URL(request.url);
-    if (url.pathname === '/api/investigation') {
-      if (request.method !== 'GET') return new Response(null, { status: 405, headers: { allow: 'GET' } });
-      if (env.DATA_CLASSIFICATION !== SYNTHETIC_ONLY) return json({ error: 'Synthetic-only data boundary is unavailable.' }, 503);
-      try {
-        return json(await listInvestigation(env));
-      } catch (error) {
-        console.error(JSON.stringify({ message: 'investigation query failed', errorType: error instanceof Error ? error.name : 'UnknownFailure' }));
-        return json({ error: 'Investigation data is unavailable.' }, 500);
-      }
+    if (env.DEPLOYMENT_ENV !== STAGING) return accessMisconfigured();
+    if (!env.ACCESS_TEAM_DOMAIN || !env.ACCESS_AUD) return accessMisconfigured();
+    try {
+      await verifyAccessAssertion(request, env);
+    } catch {
+      return accessDenied();
     }
-    return env.ASSETS.fetch(request);
+    return handleWorkspaceRequest(request, env, {
+      access: 'CLOUDFLARE_ACCESS_PROTECTED',
+      allowSyntheticSeed: true,
+    });
   },
 };
