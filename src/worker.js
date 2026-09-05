@@ -4,6 +4,8 @@ import { ingestSyntheticEvidence } from './ingest.js';
 
 const json = (value, status = 200) => new Response(JSON.stringify(value, null, 2), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 const SYNTHETIC_ONLY = 'SYNTHETIC_ONLY';
+const LOCAL_PREVIEW = 'local';
+const STAGING = 'staging';
 const SOURCE_CONTRACTS = {
   BANK: { source: 'synthetic-bank', rowsKey: 'transactions', dateKey: 'postedOn', amountKey: 'amountCents', recordType: 'DEPOSIT' },
   CLOVER: { source: 'synthetic-clover', rowsKey: 'settlements', dateKey: 'settledOn', amountKey: 'netCents', recordType: 'SETTLEMENT' },
@@ -109,8 +111,10 @@ async function listInvestigation(env, access = 'PUBLIC_SYNTHETIC_READ_ONLY') {
 
 export default {
   async fetch(request, env) {
+    const deploymentEnvironment = env.DEPLOYMENT_ENV;
+    if (![LOCAL_PREVIEW, STAGING].includes(deploymentEnvironment)) return accessMisconfigured();
     const url = new URL(request.url);
-    const staging = env.DEPLOYMENT_ENV === 'staging';
+    const staging = deploymentEnvironment === STAGING;
     if (staging) {
       if (!env.ACCESS_TEAM_DOMAIN || !env.ACCESS_AUD) return accessMisconfigured();
       try {

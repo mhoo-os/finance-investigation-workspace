@@ -37,13 +37,13 @@ test('Worker returns source-traceable synthetic investigation data', async () =>
 });
 
 test('Worker rejects non-GET API requests', async () => {
-  const response = await worker.fetch(new Request('https://example.test/api/investigation', { method: 'POST' }), {});
+  const response = await worker.fetch(new Request('https://example.test/api/investigation', { method: 'POST' }), { DEPLOYMENT_ENV: 'local' });
   assert.equal(response.status, 405);
   assert.equal(response.headers.get('allow'), 'GET');
 });
 
 test('Worker fails closed when the synthetic-only boundary is absent', async () => {
-  const response = await worker.fetch(new Request('https://example.test/api/investigation'), {});
+  const response = await worker.fetch(new Request('https://example.test/api/investigation'), { DEPLOYMENT_ENV: 'local' });
   assert.equal(response.status, 503);
   assert.deepEqual(await response.json(), { error: 'Synthetic-only data boundary is unavailable.' });
 });
@@ -155,7 +155,7 @@ test('Worker rejects artifacts and records outside the synthetic namespace', asy
 });
 
 test('Worker does not leak non-Error database failures', async () => {
-  const env = { DATA_CLASSIFICATION: 'SYNTHETIC_ONLY', DB: { prepare: () => { throw 'database detail'; } } };
+  const env = { DEPLOYMENT_ENV: 'local', DATA_CLASSIFICATION: 'SYNTHETIC_ONLY', DB: { prepare: () => { throw 'database detail'; } } };
   await withoutErrorOutput(async () => {
     const response = await worker.fetch(new Request('https://example.test/api/investigation'), env);
     assert.equal(response.status, 500);
@@ -164,8 +164,19 @@ test('Worker does not leak non-Error database failures', async () => {
 });
 
 test('Worker delegates non-API requests to static assets', async () => {
-  const response = await worker.fetch(new Request('https://example.test/'), { ASSETS: { fetch: async () => new Response('preview') } });
+  const response = await worker.fetch(new Request('https://example.test/'), { DEPLOYMENT_ENV: 'local', ASSETS: { fetch: async () => new Response('preview') } });
   assert.equal(await response.text(), 'preview');
+});
+
+test('Worker fails closed for missing, empty, and unsupported deployment modes before assets or APIs', async () => {
+  for (const deploymentEnvironment of [undefined, '', 'production', 'stagin']) {
+    const env = { ...await seededEnvironment(), DEPLOYMENT_ENV: deploymentEnvironment };
+    for (const path of ['/', '/api/investigation']) {
+      const response = await worker.fetch(new Request(`https://example.test${path}`), env);
+      assert.equal(response.status, 503, `${String(deploymentEnvironment)} ${path}`);
+      assert.deepEqual(await response.json(), { error: 'Staging access protection is unavailable.' });
+    }
+  }
 });
 
 test('staging fails closed before Access configuration is complete', async () => {

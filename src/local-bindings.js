@@ -107,6 +107,7 @@ export function createMemoryEnvironment({ assets } = {}) {
   return {
     ASSETS: assets,
     DATA_CLASSIFICATION: 'SYNTHETIC_ONLY',
+    DEPLOYMENT_ENV: 'local',
     DB: new MemoryD1(),
     EVIDENCE: new MemoryR2(),
   };
