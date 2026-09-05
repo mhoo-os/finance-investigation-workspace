@@ -4,6 +4,10 @@ WHEN EXISTS (
   SELECT 1 FROM evidence_artifacts
   WHERE object_key = NEW.object_key
     AND (source_kind IS NOT NEW.source_kind OR sha256 IS NOT NEW.sha256 OR bytes IS NOT NEW.bytes OR row_count IS NOT NEW.row_count)
+)
+OR EXISTS (
+  SELECT 1 FROM evidence_artifacts
+  WHERE rowid = NEW.rowid AND object_key IS NOT NEW.object_key
 ) BEGIN
   SELECT RAISE(ABORT, 'evidence_artifacts conflicts with immutable evidence');
 END;
@@ -30,6 +34,10 @@ AND NOT EXISTS (
     AND object_key = NEW.object_key
     AND sha256 = NEW.sha256
     AND imported_at = NEW.imported_at
+)
+OR EXISTS (
+  SELECT 1 FROM import_receipts
+  WHERE rowid = NEW.rowid AND receipt_id IS NOT NEW.receipt_id
 ) BEGIN
   SELECT RAISE(ABORT, 'import_receipts conflicts with immutable evidence');
 END;
@@ -50,6 +58,10 @@ WHEN EXISTS (
   SELECT 1 FROM normalized_records
   WHERE record_id = NEW.record_id
     AND (source_kind IS NOT NEW.source_kind OR posted_on IS NOT NEW.posted_on OR amount_cents IS NOT NEW.amount_cents OR record_type IS NOT NEW.record_type OR artifact_key IS NOT NEW.artifact_key OR source_row IS NOT NEW.source_row)
+)
+OR EXISTS (
+  SELECT 1 FROM normalized_records
+  WHERE rowid = NEW.rowid AND record_id IS NOT NEW.record_id
 ) BEGIN
   SELECT RAISE(ABORT, 'normalized_records conflicts with immutable evidence');
 END;

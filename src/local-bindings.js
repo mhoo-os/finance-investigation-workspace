@@ -40,11 +40,11 @@ export class MemoryD1 {
       }
       return;
     }
-    if (sql.startsWith('INSERT OR IGNORE INTO import_receipts')) {
+    if (sql.startsWith('INSERT INTO import_receipts')) {
       const [receiptId, objectKey, sha256, importedAt] = values;
-      if (!this.tables.importReceipts.has(receiptId)) {
-        this.tables.importReceipts.set(receiptId, { receiptId, objectKey, sha256, importedAt });
-      }
+      const existing = this.tables.importReceipts.get(receiptId);
+      if (existing && (existing.objectKey !== objectKey || existing.sha256 !== sha256)) throw new Error('import_receipts conflicts with immutable evidence');
+      if (!existing) this.tables.importReceipts.set(receiptId, { receiptId, objectKey, sha256, importedAt });
       return;
     }
     if (sql.startsWith('INSERT OR IGNORE INTO normalized_records')) {

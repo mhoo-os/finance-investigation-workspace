@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ingestSyntheticEvidence } from '../src/ingest.js';
 import { createMemoryEnvironment } from '../src/local-bindings.js';
+import localWorker from '../src/local-worker.js';
 import worker from '../src/worker.js';
 import { accessRequest, accessVerificationEnvironment, withAccessCertificates } from '../support/access-fixture.js';
 
@@ -22,7 +23,7 @@ const withoutErrorOutput = async (operation) => {
 };
 
 test('Worker returns source-traceable synthetic investigation data', async () => {
-  const response = await worker.fetch(new Request('https://example.test/api/investigation'), await seededEnvironment());
+  const response = await localWorker.fetch(new Request('https://example.test/api/investigation'), await seededEnvironment());
   const payload = await response.json();
   assert.equal(response.status, 200);
   assert.equal(payload.classification, 'SYNTHETIC_ONLY');
@@ -37,13 +38,13 @@ test('Worker returns source-traceable synthetic investigation data', async () =>
 });
 
 test('Worker rejects non-GET API requests', async () => {
-  const response = await worker.fetch(new Request('https://example.test/api/investigation', { method: 'POST' }), { DEPLOYMENT_ENV: 'local' });
+  const response = await localWorker.fetch(new Request('https://example.test/api/investigation', { method: 'POST' }), {});
   assert.equal(response.status, 405);
   assert.equal(response.headers.get('allow'), 'GET');
 });
 
 test('Worker fails closed when the synthetic-only boundary is absent', async () => {
-  const response = await worker.fetch(new Request('https://example.test/api/investigation'), { DEPLOYMENT_ENV: 'local' });
+  const response = await localWorker.fetch(new Request('https://example.test/api/investigation'), {});
   assert.equal(response.status, 503);
   assert.deepEqual(await response.json(), { error: 'Synthetic-only data boundary is unavailable.' });
 });
@@ -52,7 +53,7 @@ test('Worker returns a generic error for incomplete source traces', async () => 
   const env = await seededEnvironment();
   env.DB.tables.normalizedRecords.delete('clover-settlement-match-001');
   await withoutErrorOutput(async () => {
-    const response = await worker.fetch(new Request('https://example.test/api/investigation'), env);
+    const response = await localWorker.fetch(new Request('https://example.test/api/investigation'), env);
     assert.equal(response.status, 500);
     assert.deepEqual(await response.json(), { error: 'Investigation data is unavailable.' });
   });
@@ -63,7 +64,7 @@ test('Worker fails closed when referenced R2 evidence was deleted', async () => 
   const [objectKey] = env.EVIDENCE.objects.keys();
   env.EVIDENCE.objects.delete(objectKey);
   await withoutErrorOutput(async () => {
-    const response = await worker.fetch(new Request('https://example.test/api/investigation'), env);
+    const response = await localWorker.fetch(new Request('https://example.test/api/investigation'), env);
     assert.equal(response.status, 500);
     assert.deepEqual(await response.json(), { error: 'Investigation data is unavailable.' });
   });
@@ -74,7 +75,7 @@ test('Worker fails closed when referenced R2 evidence bytes were tampered with',
   const evidence = env.EVIDENCE.objects.values().next().value;
   evidence.raw = evidence.raw.replace('10000', '99999');
   await withoutErrorOutput(async () => {
-    const response = await worker.fetch(new Request('https://example.test/api/investigation'), env);
+    const response = await localWorker.fetch(new Request('https://example.test/api/investigation'), env);
     assert.equal(response.status, 500);
     assert.deepEqual(await response.json(), { error: 'Investigation data is unavailable.' });
   });
@@ -85,7 +86,7 @@ test('Worker fails closed when an evidence JSON pointer is invalid', async () =>
   const record = env.DB.tables.normalizedRecords.values().next().value;
   record.sourceRow = '/transactions/99';
   await withoutErrorOutput(async () => {
-    const response = await worker.fetch(new Request('https://example.test/api/investigation'), env);
+    const response = await localWorker.fetch(new Request('https://example.test/api/investigation'), env);
     assert.equal(response.status, 500);
     assert.deepEqual(await response.json(), { error: 'Investigation data is unavailable.' });
   });
@@ -96,7 +97,7 @@ test('Worker fails closed when a valid evidence pointer identifies a different r
   const record = env.DB.tables.normalizedRecords.values().next().value;
   record.sourceRow = '/transactions/1';
   await withoutErrorOutput(async () => {
-    const response = await worker.fetch(new Request('https://example.test/api/investigation'), env);
+    const response = await localWorker.fetch(new Request('https://example.test/api/investigation'), env);
     assert.equal(response.status, 500);
     assert.deepEqual(await response.json(), { error: 'Investigation data is unavailable.' });
   });
@@ -107,7 +108,7 @@ test('Worker rejects a forged MATCHED link whose IDs, dates, and amounts disagre
   const finding = env.DB.tables.reconciliationFindings.get('matched-deposit-1');
   finding.cloverRecordId = 'clover-settlement-anomaly-002';
   await withoutErrorOutput(async () => {
-    const response = await worker.fetch(new Request('https://example.test/api/investigation'), env);
+    const response = await localWorker.fetch(new Request('https://example.test/api/investigation'), env);
     assert.equal(response.status, 500);
     assert.deepEqual(await response.json(), { error: 'Investigation data is unavailable.' });
   });
@@ -121,7 +122,7 @@ test('Worker rejects forged finding amounts or status', async () => {
     const env = await seededEnvironment();
     mutate(env.DB.tables.reconciliationFindings.get('matched-deposit-1'));
     await withoutErrorOutput(async () => {
-      const response = await worker.fetch(new Request('https://example.test/api/investigation'), env);
+      const response = await localWorker.fetch(new Request('https://example.test/api/investigation'), env);
       assert.equal(response.status, 500);
       assert.deepEqual(await response.json(), { error: 'Investigation data is unavailable.' });
     });
@@ -132,7 +133,7 @@ test('Worker rejects forged coverage counts', async () => {
   const env = await seededEnvironment();
   env.DB.tables.monthlyCoverage.get('2026-01').bankRows += 1;
   await withoutErrorOutput(async () => {
-    const response = await worker.fetch(new Request('https://example.test/api/investigation'), env);
+    const response = await localWorker.fetch(new Request('https://example.test/api/investigation'), env);
     assert.equal(response.status, 500);
     assert.deepEqual(await response.json(), { error: 'Investigation data is unavailable.' });
   });
@@ -143,35 +144,38 @@ test('Worker rejects artifacts and records outside the synthetic namespace', asy
   const artifact = artifactEnv.DB.tables.evidenceArtifacts.values().next().value;
   artifact.objectKey = 'client/evidence.json';
   await withoutErrorOutput(async () => {
-    assert.equal((await worker.fetch(new Request('https://example.test/api/investigation'), artifactEnv)).status, 500);
+    assert.equal((await localWorker.fetch(new Request('https://example.test/api/investigation'), artifactEnv)).status, 500);
   });
 
   const recordEnv = await seededEnvironment();
   const record = recordEnv.DB.tables.normalizedRecords.values().next().value;
   record.artifactKey = 'client/evidence.json';
   await withoutErrorOutput(async () => {
-    assert.equal((await worker.fetch(new Request('https://example.test/api/investigation'), recordEnv)).status, 500);
+    assert.equal((await localWorker.fetch(new Request('https://example.test/api/investigation'), recordEnv)).status, 500);
   });
 });
 
 test('Worker does not leak non-Error database failures', async () => {
-  const env = { DEPLOYMENT_ENV: 'local', DATA_CLASSIFICATION: 'SYNTHETIC_ONLY', DB: { prepare: () => { throw 'database detail'; } } };
+  const env = { DATA_CLASSIFICATION: 'SYNTHETIC_ONLY', DB: { prepare: () => { throw 'database detail'; } } };
   await withoutErrorOutput(async () => {
-    const response = await worker.fetch(new Request('https://example.test/api/investigation'), env);
+    const response = await localWorker.fetch(new Request('https://example.test/api/investigation'), env);
     assert.equal(response.status, 500);
     assert.deepEqual(await response.json(), { error: 'Investigation data is unavailable.' });
   });
 });
 
 test('Worker delegates non-API requests to static assets', async () => {
-  const response = await worker.fetch(new Request('https://example.test/'), { DEPLOYMENT_ENV: 'local', ASSETS: { fetch: async () => new Response('preview') } });
+  const response = await localWorker.fetch(new Request('https://example.test/'), { ASSETS: { fetch: async () => new Response('preview') } });
   assert.equal(await response.text(), 'preview');
 });
 
-test('Worker fails closed for missing, empty, and unsupported deployment modes before assets or APIs', async () => {
-  for (const deploymentEnvironment of [undefined, '', 'production', 'stagin']) {
-    const env = { ...await seededEnvironment(), DEPLOYMENT_ENV: deploymentEnvironment };
-    for (const path of ['/', '/api/investigation']) {
+test('deployed Worker fails closed for local, missing, empty, and unsupported modes before every binding', async () => {
+  for (const deploymentEnvironment of ['local', undefined, '', 'production', 'stagin']) {
+    const env = { DEPLOYMENT_ENV: deploymentEnvironment };
+    for (const binding of ['ASSETS', 'DB', 'EVIDENCE']) {
+      Object.defineProperty(env, binding, { get() { throw new Error(`${binding} binding was accessed`); } });
+    }
+    for (const path of ['/', '/api/investigation', '/ops/seed-synthetic']) {
       const response = await worker.fetch(new Request(`https://example.test${path}`), env);
       assert.equal(response.status, 503, `${String(deploymentEnvironment)} ${path}`);
       assert.deepEqual(await response.json(), { error: 'Staging access protection is unavailable.' });
@@ -238,6 +242,6 @@ test('staging seed route fails closed on classification and storage errors', asy
 });
 
 test('seed route is absent outside staging', async () => {
-  const response = await worker.fetch(new Request('https://example.test/ops/seed-synthetic', { method: 'POST' }), await seededEnvironment());
+  const response = await localWorker.fetch(new Request('https://example.test/ops/seed-synthetic', { method: 'POST' }), await seededEnvironment());
   assert.equal(response.status, 404);
 });

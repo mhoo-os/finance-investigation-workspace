@@ -28,8 +28,16 @@ export async function ingestSyntheticEvidence(env, { now = () => new Date() } = 
     statements.push(
       env.DB.prepare('INSERT OR IGNORE INTO evidence_artifacts (object_key, source_kind, sha256, bytes, row_count) VALUES (?, ?, ?, ?, ?)')
         .bind(artifact.objectKey, artifact.sourceKind, artifact.sha256, byteLength(artifact.raw), artifact.rows.length),
-      env.DB.prepare('INSERT OR IGNORE INTO import_receipts (receipt_id, object_key, sha256, imported_at) VALUES (?, ?, ?, ?)')
-        .bind(`sha256:${artifact.sourceKind.toLowerCase()}:${artifact.sha256}`, artifact.objectKey, artifact.sha256, importedAt.toISOString()),
+      env.DB.prepare('INSERT INTO import_receipts (receipt_id, object_key, sha256, imported_at) SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM import_receipts WHERE receipt_id = ? AND object_key = ? AND sha256 = ?)')
+        .bind(
+          `sha256:${artifact.sourceKind.toLowerCase()}:${artifact.sha256}`,
+          artifact.objectKey,
+          artifact.sha256,
+          importedAt.toISOString(),
+          `sha256:${artifact.sourceKind.toLowerCase()}:${artifact.sha256}`,
+          artifact.objectKey,
+          artifact.sha256,
+        ),
     );
   }
   for (const record of dataset.records) {
