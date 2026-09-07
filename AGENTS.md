@@ -50,6 +50,8 @@
 
 ## Continue, finish, or escalate
 
+Before continuation or handoff, record the primary issue (or explicitly none), implementation-owning repository, coordinating repo head and retained worker (or none), exact source commit and PR/evidence links, existing run-ledger location, dependencies/blockers and their owners (or explicitly none/unknown), and the authorized next step. Carry this mapping into the handoff and acknowledge the authoritative instructions commit and reading path. Resolve unknown or conflicting ownership with the owning head before dependent work; a project label or issue status does not grant authority or create a new task.
+
 - Continue only the coordinator's explicit issue/repository scope. Existing
   workers retain custody until an acknowledged handoff and notification; do not
   duplicate or interrupt them. Setup documentation is not feature/runtime work.
