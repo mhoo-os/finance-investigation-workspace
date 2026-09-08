@@ -6,8 +6,10 @@
   "scripts": {
     "test": "node --test",
     "coverage": "node --experimental-test-coverage --test --test-coverage-include='src/**/*.js' --test-coverage-include='public/**/*.js' --test-coverage-lines=95 --test-coverage-branches=95 --test-coverage-functions=95",
-    "check": "node --check src/fixture.js && node --check src/ingest.js && node --check src/local-bindings.js && node --check src/local.js && node --check src/worker.js && node --check public/app.js",
+    "check": "node --check src/access.js && node --check src/fixture.js && node --check src/ingest.js && node --check src/local-bindings.js && node --check src/local-worker.js && node --check src/local.js && node --check src/worker.js && node --check public/app.js",
+    "deploy:check": "wrangler deploy --env staging --dry-run --outdir dist/wrangler",
     "start": "node --input-type=module --eval \"import('./src/local.js').then(async ({ startLocalWorkspace }) => { const { url } = await startLocalWorkspace(); console.log('Synthetic Finance Investigation Workspace: ' + url); })\"",
     "preview": "npm start"
-  }
+  },
+  "devDependencies": { "wrangler": "4.129.0" }
 }

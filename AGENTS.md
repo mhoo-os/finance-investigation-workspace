@@ -37,7 +37,9 @@
 - Node.js 24 matches `.github/workflows/ci.yml`. `package.json` defines
   `npm test` (Node tests), `npm run coverage` (95% line/branch/function gates),
   and `npm run check` (JavaScript syntax). Run these before a PR as required by
-  CLAUDE.md. There is no build, lint, or browser-E2E script on this base.
+  CLAUDE.md. Install pinned dependencies with `npm ci`; also run
+  `npm run deploy:check` for staging packaging only (`--dry-run`). There is no
+  application build, lint, or browser-E2E script on this base.
 - `npm start` / `npm run preview` seeds disposable in-memory bindings and serves
   localhost. Do not use a production database/bucket. No deployment is authorized
   by these commands or by this setup work.

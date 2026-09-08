@@ -40,26 +40,26 @@ export class MemoryD1 {
       }
       return;
     }
-    if (sql.startsWith('INSERT OR IGNORE INTO import_receipts')) {
+    if (sql.startsWith('INSERT INTO import_receipts')) {
       const [receiptId, objectKey, sha256, importedAt] = values;
-      if (!this.tables.importReceipts.has(receiptId)) {
-        this.tables.importReceipts.set(receiptId, { receiptId, objectKey, sha256, importedAt });
-      }
+      const existing = this.tables.importReceipts.get(receiptId);
+      if (existing && (existing.objectKey !== objectKey || existing.sha256 !== sha256)) throw new Error('import_receipts conflicts with immutable evidence');
+      if (!existing) this.tables.importReceipts.set(receiptId, { receiptId, objectKey, sha256, importedAt });
       return;
     }
-    if (sql.startsWith('INSERT OR REPLACE INTO normalized_records')) {
+    if (sql.startsWith('INSERT OR IGNORE INTO normalized_records')) {
       const [id, sourceKind, postedOn, amountCents, recordType, artifactKey, sourceRow] = values;
-      this.tables.normalizedRecords.set(id, { id, sourceKind, postedOn, amountCents, recordType, artifactKey, sourceRow });
+      if (!this.tables.normalizedRecords.has(id)) this.tables.normalizedRecords.set(id, { id, sourceKind, postedOn, amountCents, recordType, artifactKey, sourceRow });
       return;
     }
-    if (sql.startsWith('INSERT OR REPLACE INTO monthly_coverage')) {
+    if (sql.startsWith('INSERT OR IGNORE INTO monthly_coverage')) {
       const [month, bankRows, cloverRows, status] = values;
-      this.tables.monthlyCoverage.set(month, { month, bankRows, cloverRows, status });
+      if (!this.tables.monthlyCoverage.has(month)) this.tables.monthlyCoverage.set(month, { month, bankRows, cloverRows, status });
       return;
     }
-    if (sql.startsWith('INSERT OR REPLACE INTO reconciliation_findings')) {
+    if (sql.startsWith('INSERT OR IGNORE INTO reconciliation_findings')) {
       const [id, type, status, expectedCents, observedCents, bankRecordId, cloverRecordId, explanation] = values;
-      this.tables.reconciliationFindings.set(id, { id, type, status, expectedCents, observedCents, bankRecordId, cloverRecordId, explanation });
+      if (!this.tables.reconciliationFindings.has(id)) this.tables.reconciliationFindings.set(id, { id, type, status, expectedCents, observedCents, bankRecordId, cloverRecordId, explanation });
       return;
     }
     throw new Error(`Unsupported local D1 statement: ${sql}`);
@@ -107,6 +107,7 @@ export function createMemoryEnvironment({ assets } = {}) {
   return {
     ASSETS: assets,
     DATA_CLASSIFICATION: 'SYNTHETIC_ONLY',
+    DEPLOYMENT_ENV: 'local',
     DB: new MemoryD1(),
     EVIDENCE: new MemoryR2(),
   };

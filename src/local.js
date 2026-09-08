@@ -5,7 +5,7 @@ import { dirname, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ingestSyntheticEvidence } from './ingest.js';
 import { createMemoryEnvironment } from './local-bindings.js';
-import worker from './worker.js';
+import localWorker from './local-worker.js';
 
 const publicRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../public');
 const contentTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8' };
@@ -49,7 +49,7 @@ export async function startLocalWorkspace({ host = '127.0.0.1', port = 8787, now
         body: ['GET', 'HEAD'].includes(method) ? undefined : incoming,
         duplex: ['GET', 'HEAD'].includes(method) ? undefined : 'half',
       });
-      const response = await worker.fetch(request, env);
+      const response = await localWorker.fetch(request, env);
       outgoing.writeHead(response.status, Object.fromEntries(response.headers));
       outgoing.end(Buffer.from(await response.arrayBuffer()));
     } catch {
