@@ -2,6 +2,13 @@
 
 This runbook is only for the synthetic Cloudflare staging environment. Never substitute a production environment, production DNS zone, provider credential, or client file.
 
+Source review and eligible merge do not authorize execution of this runbook.
+The September 8 source reconciliation preserves synthetic staging; no deployment,
+migration, seed, Access policy, or real-data action is included. Missing Access
+values block deployment readiness, not review of fail-closed source. Confirm the
+owner-approved exact staging hostname as well as the values below before any
+separately authorized deployment.
+
 ## Fixed staging inventory
 
 | Resource | Staging identifier |
